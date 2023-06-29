@@ -4,6 +4,10 @@ Created on Thursday Oct 13 2020
 َAll rights reserved 2020
 """
 
+"""
+Modified by Jonas Scholz
+"""
+
 import itertools
 import numpy as np
 import operator
@@ -16,23 +20,23 @@ class BAF2:
     combination_feature_weights = {}
     subsets = []
     recovery_behaviors = []
-    gen = [0]
     support_repetitions = {}
     sum_of_weights_for_each_recovery_behavior = {}
     current_best_recovery_behavior = "Nothing"
     negative_sets = []
     init_phase = True
 
-    def __init__(self, scenario, gen):
-        self.gen[0] = gen
+    def __init__(self, featureDimensions):
         self.support_weights = {}
         self.combination_feature_weights = {}
         self.subsets = []
         self.recovery_behaviors = []
         self.support_repetitions = {}
         self.sum_of_weights_for_each_recovery_behavior = {}
-        self.current_best_recovery_behavior = "Nothing"
+        self.current_best_recovery_behavior = 0
         self.init_phase=True
+        self.featureDimensions = featureDimensions
+        self.numFeatures = len(self.featureDimensions)
         # self.recur_subset_for_comb(range(len(scenario) * 2))
         # for itr in self.subsets:
         #     self.combination_feature_weights[str(itr)] = 1
@@ -44,6 +48,7 @@ class BAF2:
         if 0 < l <= self.num_features_to_consider:
             for x in itertools.combinations(s, l):
                 numbers = self.arg_to_combination_numbers(x)
+                #print("New: ", numbers)
                 # if str(numbers) not in self.negative_sets:
                 if self.init_phase or (str(numbers) in self.combination_feature_weights):#(str(numbers) == max(self.combination_feature_weights.items(), key=operator.itemgetter(1))[0]):#(str(numbers) in self.combination_feature_weights):
                     if len(numbers) == self.num_features_to_consider:
@@ -70,24 +75,37 @@ class BAF2:
     def arg_to_combination_numbers(self, argument1):
         lst = []
         for arg in argument1:
-            if len(arg) == 3:
-                lst.append(arg[0] * 2)
-                lst.append(arg[0] * 2 + 1)
+            # Change this number and the one below
+            if len(arg) >= 3:
+                for idx in range(self.numFeatures):
+                    lst.append(arg[0] * self.numFeatures + idx)
             elif len(arg) == 2:
-                if arg[1] in ['red', 'green', 'blue', 'yellow']:
-                    lst.append(arg[0] * 2)
-                else:
-                    lst.append(arg[0] * 2 + 1)
+                # TODO: Figure out this number prob not 4
+                lst.append(arg[0] * self.numFeatures + self.get_offset(arg[1]))
         return lst
+    
+    def get_offset(self, argNum):
+        offset = 0
+        sum = 0
+        for num in self.featureDimensions:
+            sum += num
+            if argNum < sum:
+                return offset
+            offset += 1
+        return offset - 1
 
-    def enumeratea_scenarios(self, scenario):
+    # Not sure how to change this
+    def enumerate_scenarios(self, scenario):
         enumerated_scenarios = []
         for idx in range(len(scenario)):
-            if scenario[idx][0] != 'Noc':
-                enumerated_scenarios.append([idx, scenario[idx][0]])
-                enumerated_scenarios.append([idx, scenario[idx][1]])
+            if scenario[idx][0] != -1:
+                for featIdx in range(len(scenario[idx])):
+                    enumerated_scenarios.append([idx, scenario[idx][featIdx]])
             else:
-                enumerated_scenarios.append([idx, scenario[idx][0], scenario[idx][1]])
+                enum_scenario = [idx]
+                for featIdx in range(len(scenario[idx])):
+                    enum_scenario.append(scenario[idx][featIdx])
+                enumerated_scenarios.append(enum_scenario)
         return enumerated_scenarios
 
     def remove_others(self, idx):
@@ -98,7 +116,7 @@ class BAF2:
     def compute_combination_feature_weights(self, best_recovery_behavior, all_scenarios_so_far,
                                             corresponding_recoveries_for_scenarios_so_far):
         should_change = True
-        numerical_scenario = np.array(self.gen[0].scenario_to_numerical())
+        
         # self.combination_feature_weights = {}
         if len(all_scenarios_so_far) > 0:
             self.init_phase = False
@@ -136,11 +154,12 @@ class BAF2:
     def update_baf(self, scenario, best_recovery_behavior, all_scenarios_so_far,
                    corresponding_recoveries_for_scenarios_so_far):
         self.current_best_recovery_behavior = best_recovery_behavior
-        enumerated_scenarios = self.enumeratea_scenarios(scenario)
+        enumerated_scenarios = self.enumerate_scenarios(self.to_2D_array(scenario))
         self.recur_subset(enumerated_scenarios)
         self.add_recovery_behavior()
         if self.compute_combination_feature_weights(best_recovery_behavior, all_scenarios_so_far,
                                                     corresponding_recoveries_for_scenarios_so_far):
+            #print("Test more feature (new)")
             self.num_features_to_consider += 1
             self.negative_sets = []
             self.init_phase = True
@@ -148,9 +167,9 @@ class BAF2:
     def divid_noc_in_scenario(self, scenario):
         divided_noc_scenario = []
         for state in scenario:
-            if (len(state)==3):
-                divided_noc_scenario.append([state[0], state[1]])
-                divided_noc_scenario.append([state[0], state[2]])
+            if (len(state)>=3):
+                for idx in range(len(state) - 1):
+                    divided_noc_scenario.append([state[0], state[idx + 1]])
             else:
                 divided_noc_scenario.append(state)
         return divided_noc_scenario
@@ -163,7 +182,7 @@ class BAF2:
         return max(set(lst), key=lst.count)
 
     def compute_sum_of_weights_for_each_recovery_behavior(self, show_rule, scenario, previous_scenarios,
-                                                          previous_best_recoveries):
+                                                          previous_best_recoveries, num_scenario):
         if self.combination_feature_weights == {}:
             return ''
         sum_of_weights = {}
@@ -177,17 +196,17 @@ class BAF2:
                 max_weighted_combinations_key = key
         max_indices_list = max_weighted_combinations_key.split('[')[1].split(']')[0].split(',')
         max_indices_list = list(map(int, max_indices_list))
-        current_scenarios_columns = list(np.array(self.gen[0].scenario_to_numerical())[max_indices_list])
+        # Not 100% sure if scenario is correct here
+        current_scenarios_columns = list(np.array(num_scenario)[max_indices_list])
         recovery_behavior_weights = {}
         for recovery_behavior in self.recovery_behaviors:
             recovery_behavior_weights[recovery_behavior] = 0
         for recovery_behavior in self.recovery_behaviors:
-            rec_beh_num = self.gen[0].recovery_behavior_to_numerical_with_arg(recovery_behavior)
+            rec_beh_num = recovery_behavior
             for idx, prev_scenario in enumerate(previous_scenarios):
                 if (rec_beh_num == previous_best_recoveries[idx]) and (
                         str(current_scenarios_columns) == str(list(np.array(prev_scenario)[max_indices_list]))): # this lines checks whether a previous scenario have the same recovery behavior as the current one or not and also using the feature numbers extracted from the highest combination weight
-                    recovery_behavior_weights[
-                        self.gen[0].numerical_to_recovery_behavior(previous_best_recoveries[idx])] += 1
+                    recovery_behavior_weights[previous_best_recoveries[idx]] += 1
         scenario = self.divid_noc_in_scenario(scenario)
         if recovery_behavior_weights != {}:
             max_val = max([v for k,v in recovery_behavior_weights.items()])
@@ -198,7 +217,7 @@ class BAF2:
                     print(f"{[scenario[idx] for idx in max_indices_list]}->{predicted_recovery} -- weight: {recovery_behavior_weights[predicted_recovery]}")
                 return predicted_recovery
             else:
-                return self.gen[0].numerical_to_recovery_behavior(self.most_common(previous_best_recoveries))
+                return self.most_common(previous_best_recoveries)
 
         else:
             return ''
@@ -213,8 +232,19 @@ class BAF2:
                 recovery_behavior_with_highest_sum = recovery_behavior
         return recovery_behavior_with_highest_sum
 
+    def to_1D_array(self, scenario):
+        array = []
+        for comb in scenario:
+            for feature in comb:
+                array.append(feature)
+        return array
+    
+    def to_2D_array(self, scenario_1D):
+        return [scenario_1D[i:i + self.numFeatures] for i in range(0, len(scenario_1D), self.numFeatures)]
+
     def generate_second_guess(self, scenario, previous_scenarios, previous_best_recoveries, show_rule=True):
-        enumerated_scenarios = self.enumeratea_scenarios(scenario)
+        scenario_2D = self.to_2D_array(scenario)
+        enumerated_scenarios = self.enumerate_scenarios(scenario_2D)
         self.recur_subset(enumerated_scenarios)
         return self.compute_sum_of_weights_for_each_recovery_behavior(show_rule, enumerated_scenarios, previous_scenarios,
-                                                                      previous_best_recoveries)
+                                                                      previous_best_recoveries, scenario)
